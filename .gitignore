@@ -1,0 +1,29 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+venv/
+
+# --- Environment Variables (絶対後悔禁止) ---
+.env
+.env.local
+.env.*.local
+
+# --- System ---
+.DS_Store
+Thumbs.db
+
+# --- Editor ---
+.vscode/
+.idea/
+
+# --- Docker ---
+docker-compose.override.yml
+
+# --- Node.js (Frontend用. まだないけど先に書いておく) ---
+node_modules/
+.next/
+out/
+build/

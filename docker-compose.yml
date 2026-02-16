@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  backend:
+    build: ./backend
+    ports:
+      # ホスト(あなたのPC)の8000番ポートを、コンテナの8080番に繋ぐ
+      - "8000:8080"
+    volumes:
+      # コードを書き換えたら即材に反映されるように同期する(ホットリロード)
+      - ./backend:/app
+    # 環境変数は後で .env ファイルから読み込む設定
+    env_file:
+      - .env
+      
