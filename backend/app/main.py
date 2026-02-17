@@ -1,7 +1,7 @@
-import os
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+import os
 import google.generativeai as genai
 from dotenv import load_dotenv
 
@@ -74,14 +74,26 @@ async def chat_endpoint(request: ChatRequest):
     try:
         # AIに聞く
         response = model.generate_content(request.message)
-        
+        ai_text = response.text
         # 将来的にここで「会話履歴をSupabaseに保存」するコードを追加できます
-        # if supabase:
-        #     supabase.table("chats").insert({...})
+        if supabase:
+            try:
+                data ={
+                    "user_message": request.message,
+                    "ai_response": ai_text
+                }
+                # SQLで作成した[chat_histor]という名前に合わせます。
+                supabase.table("chat_history").insert(data).execute()
+                print("✅ saved to Supabase")
+            except Exception as db_err:
+                # DB保存でエラーが出ても、AIの返答は止めたくないのでPrintのみ
+                print(f"✖ Database Save Error: {db_err}")
 
         return {
             "user_message": request.message,
             "ai_response": response.text
         }
     except Exception as e:
+        print(f"✖ Chat Error: {e}")
         return {"error": str(e)}
+    
