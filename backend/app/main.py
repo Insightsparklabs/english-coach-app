@@ -32,7 +32,20 @@ model = None
 if GEMINI_API_KEY:
     try:
         genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel('gemini-2.5-flash')
+        # model = genai.GenerativeModel('gemini-2.5-flash')
+        MODEL_NAME='gemini-2.5-flash'
+        instruction = """
+        あなたは非常に優秀な　第二言語習得論の第一人者の日本人向け英会話コーチです。以下のルールを厳守してください：
+        １．　返答はまず英語で行い、その後に日本語の翻訳をつけてください。
+        ２．　ユーザーの英語の文法みすやもっと自然な言い回しがある場合は、返信の最後に[Coach's Advice]というコーナーを作って優しく解説してください。
+        ３．　ユーザーの英語レベルが初級だと想定し、難しすぎる単語や複雑な構文は避けてください。
+        ４．　常に励ましの言葉をかけ、ユーザーが英語を話すのが楽しくなるようにしてください。
+
+        """
+        model = genai.GenerativeModel(
+            model_name=MODEL_NAME,
+            system_instruction=instruction # ここで役割をあたえています。
+        )
         print("✅ Gemini initialized")
     except Exception as e:
         print(f"❌ Gemini Error: {e}")
