@@ -97,3 +97,19 @@ async def chat_endpoint(request: ChatRequest):
         print(f"✖ Chat Error: {e}")
         return {"error": str(e)}
     
+
+# 既存の@app.post("/chat")の下あたりに追加
+@app.get("/history")
+async def get_history():
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Supabase is not configued")
+        
+    try:
+        # chat_historyテーブルから、作成日時(created_at)の古い順に全件取得
+        response = supabase.table("chat_history").select("*").order("created_at", desc=False).execute()
+        return response.data
+    except Exception as e:
+        print(f"✖ Fetch History Error {e}")
+        return{"error": str(e)}
+        
+        
