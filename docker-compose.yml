@@ -12,4 +12,13 @@ services:
     # 環境変数は後で .env ファイルから読み込む設定
     env_file:
       - .env
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./frontend:/app
+    depends_on:
+      - backend
       
