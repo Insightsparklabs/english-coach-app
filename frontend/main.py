@@ -1,3 +1,4 @@
+import os
 import streamlit as st
 import requests
 
@@ -5,9 +6,13 @@ st.set_page_config(page_title="English Coach AI", page_icon="🤖")
 st.title("English Coach AI 🤖")
 st.caption("あなたの優しい英会話コーチです。なんでも英語で話しかけてね！")
 
+# 環境変数からURLを取得 (設定がなければローカル用を使う)
+# クラウドに上げた時は、Google Cloudの画面でこのURLを指定します。
+BACKEND_BASE_URL = os.environ.get("BACKEND_BASE_URL", "http://backend:8080")
+
 # バックエンドのURL (Dockerネットワーク内での名前を指定)
-BACKEND_URL = "http://backend:8080/chat"
-HISTORY_URL = "http://backend:8080/history" # 履歴取得用のURL
+BACKEND_URL = f"{BACKEND_BASE_URL}/chat"
+HISTORY_URL = f"{BACKEND_BASE_URL}/history" # 履歴取得用のURL
 
 # --- 変更点: チャット履歴をSupabaseから初期読み込みする ---
 #チャット履歴を保持
@@ -40,7 +45,7 @@ if prompt := st.chat_input("How are you today?"):
     # バックエンドへリクエスト
     try:
         with st.spinner("Coach is thinking..."):
-            response = requests.post(BACKEND_URL, json={"messages": prompt})
+            response = requests.post(BACKEND_URL, json={"message": prompt})
             if response.status_code == 200:
                 ai_response = response.json().get("ai_response")
                 #AIの返答を表示
