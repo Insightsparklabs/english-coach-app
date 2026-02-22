@@ -15,7 +15,7 @@ SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:8501").rstrip('/')
 
 # --- Supabaseの準備 ---
-@st.cache_resource
+# @st.cache_resource
 def init_supabase():
     if SUPABASE_URL and SUPABASE_KEY:
         return create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -91,19 +91,43 @@ if st.session_state.user is None:
 
     with tab_reset:
         st.subheader("パスワードの再設定")
-        st.caption("登録したメールアドレスを入力してください。")
-        with st.form("reset_form"):
-            reset_email = st.text_input("メールアドレス")
-            reset_submit = st.form_submit_button("リセットメールを送信")
-            if reset_submit and supabase:
+        
+        # 1. メールアドレスを入力してコードを受け取る
+        reset_email = st.text_input("登録しているメールアドレス", key="reset_email_input")
+        if st.button("確認コードをメールに送信"):
+            if supabase:
                 try:
-                    supabase.auth.reset_password_email(
-                        reset_email, 
-                        options={"redirect_to": FRONTEND_URL} # 🌟 変数を使用
-                    )
-                    st.success("✉️ パスワード再設定用のメールを送信しました！")
+                    # OTP（6桁のコード）を送信する
+                    supabase.auth.reset_password_for_email(reset_email)
+                    st.success("✉️ 確認コードを送信しました！メールをご確認ください。")
                 except Exception as e:
-                    st.error(f"メールの送信に失敗しました: {e}")
+                    st.error(f"送信エラー: {e}")
+
+        st.divider()
+
+        # 2. メールに届いたコードと、新しいパスワードを入力する
+        st.markdown("#### 新しいパスワードの設定")
+        otp_code = st.text_input("メールに届いた6桁のコード", key="otp_code")
+        new_password = st.text_input("新しいパスワード (6文字以上)", type="password", key="new_pw_reset")
+
+        if st.button("パスワードを更新する"):
+            if not otp_code or not new_password:
+                st.warning("コードと新しいパスワードを入力してください。")
+            elif supabase:
+                try:
+                    # ① 6桁のコード（OTP）を使って一時的に認証を通す
+                    supabase.auth.verify_otp({
+                        "email": reset_email, 
+                        "token": otp_code, 
+                        "type": "recovery"
+                    })
+                    
+                    # ② そのままパスワードを上書き更新する
+                    supabase.auth.update_user({"password": new_password})
+                    
+                    st.success("✅ パスワードの変更が完了しました！上の「🔑 ログイン」タブから新しいパスワードでログインしてください。")
+                except Exception as e:
+                    st.error(f"❌ エラー: コードが間違っているか、有効期限切れです ({e})")
 
 # ==========================================
 # 画面B：ログインしている時
