@@ -5,6 +5,7 @@ import requests
 from supabase import create_client, Client
 from dotenv import load_dotenv # 👈 これを追加！
 
+
 load_dotenv() # 👈 これを追加！
 
 # --- 環境変数の取得 ---
@@ -26,12 +27,48 @@ if "user" not in st.session_state:
     st.session_state.user = None
 
 # ==========================================
+# 🌟 追加：Googleからの帰り道（リダイレクト）をキャッチする！
+# ==========================================
+if "code" in st.query_params:
+    try:
+        # URLにくっついてきた暗号(code)を、Supabaseの通行証に交換！
+        auth_code = st.query_params["code"]
+        response = supabase.auth.exchange_code_for_session({"auth_code": auth_code})
+        st.session_state.user = response.user
+        st.query_params.clear() # URLを綺麗にする
+        st.rerun() # 画面をリロードしてチャット画面へ！
+    except Exception as e:
+        st.error(f"Googleログインに失敗しました: {e}")
+
+
+# ==========================================
 # 画面A：ログインしていない時（ログイン画面を表示）
 # ==========================================
 if st.session_state.user is None:
     st.title("English Coach AI 🤖")
     st.subheader("ログインしてください")
-    
+
+    # ==========================================
+    # 🌟 追加：Googleログインボタン
+    # ==========================================
+    if supabase:
+        try:
+            # Googleのログイン画面のURLを発行
+            res = supabase.auth.sign_in_with_oauth({
+                "provider": "google",
+                "options": {
+                    # 注意：ローカルでテストする時は localhost に向けます！
+                    # 本番（Cloud Run）にデプロイする時は "https://coach.g-book.org" に書き換えます。
+                    "redirect_to": "http://localhost:8501" 
+                }
+            })
+            st.link_button("🌐 Googleでログイン", res.url, use_container_width=True)
+            st.divider() # 区切り線を引いて、メールアドレスログインと分ける
+            st.caption("またはメールアドレスでログイン")
+        except Exception as e:
+            st.error("Google連携の準備中...")
+
+
     with st.form("login_form"):
         email = st.text_input("メールアドレス (ID)")
         password = st.text_input("パスワード", type="password")
