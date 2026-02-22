@@ -2,7 +2,7 @@ import os
 import streamlit as st
 import requests
 
-from supabase import create_client, Client
+from supabase import create_client, ClientOptions
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -14,11 +14,42 @@ SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 # 🌟 本番環境とローカル環境を自動で切り替えるためのURL
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:8501").rstrip('/')
 
+# ==========================================
+# 🌟 新しい仕組み：セキュリティを守りつつ、Googleログインを成功させる特殊な記憶領域
+# ==========================================
+@st.cache_resource
+def get_global_verifier_store():
+    # Googleの「合い言葉」だけを一時的に保持する金庫
+    return {}
+
+class SecureStorage:
+    def __init__(self):
+        self.local_store = {} # ユーザー個人の秘密の記憶（他人に絶対見えない）
+        self.global_store = get_global_verifier_store() # 合い言葉用の一時記憶
+
+    def get_item(self, key):
+        if "code-verifier" in key:
+            return self.global_store.get(key)
+        return self.local_store.get(key)
+
+    def set_item(self, key, value):
+        if "code-verifier" in key:
+            self.global_store[key] = value
+        else:
+            self.local_store[key] = value
+
+    def remove_item(self, key):
+        if "code-verifier" in key:
+            self.global_store.pop(key, None)
+        else:
+            self.local_store.pop(key, None)
+
 # --- Supabaseの準備 ---
-# @st.cache_resource
 def init_supabase():
     if SUPABASE_URL and SUPABASE_KEY:
-        return create_client(SUPABASE_URL, SUPABASE_KEY)
+        # 🌟 先ほど作った特殊な記憶領域をSupabaseに組み込む
+        options = ClientOptions(storage=SecureStorage())
+        return create_client(SUPABASE_URL, SUPABASE_KEY, options=options)
     return None
 
 supabase = init_supabase()
@@ -34,12 +65,17 @@ if "code" in st.query_params:
     try:
         auth_code = st.query_params["code"]
         if supabase:
-            response = supabase.auth.exchange_code_for_session({"auth_code": auth_code})
+            response = supabase.auth.exchange_code_for_session({
+                "auth_code": auth_code
+            })
+        if response:    
             st.session_state.user = response.user
             st.query_params.clear()
             st.rerun()
     except Exception as e:
-        st.error(f"Googleログインに失敗しました: {e}")
+        st.warning("ログインセッションの有効期限が切れました。もう一度お試しください")
+        st.query_params.clear()
+        st.error(f"詳細えらー: {e}")
 
 # ==========================================
 # 画面A：ログインしていない時
@@ -135,6 +171,20 @@ if st.session_state.user is None:
 else:
     with st.sidebar:
         st.write(f"👤 ログイン中: {st.session_state.user.email}")
+
+        st.divider()
+        st.subheader("🎯 目標レベル設定")
+        target_level = st.selectbox(
+            "目指す英語レベルを選んでください",
+            [
+                "初級 (A1-A2: 基礎からやり直し)", 
+                "中級 (B1-B2: ビジネスで通用するレベル)", 
+                "上級 (Versant C1: プロフェッショナル)"
+            ],
+            index=2  # デフォルトを C1 に設定
+        )
+        st.divider()
+
         if st.button("ログアウト"):
             supabase.auth.sign_out()
             st.session_state.user = None
@@ -181,7 +231,14 @@ else:
         try:
             with st.spinner("Coach is thinking..."):
                 user_id = st.session_state.user.id
-                response = requests.post(f"{BACKEND_BASE_URL}/chat", json={"message": prompt, "user_id": user_id})
+                # 🌟 ここで level を含めた JSON を作る！
+                payload = {
+                    "message": prompt, 
+                    "user_id": user_id,
+                    "level": target_level  # 👈 変数 target_level を送る
+                }
+                response = requests.post(f"{BACKEND_BASE_URL}/chat", json=payload)
+                
                 if response.status_code == 200:
                     ai_response = response.json().get("ai_response")
                     with st.chat_message("assistant"):
