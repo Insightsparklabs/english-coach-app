@@ -83,7 +83,8 @@ else:
 # ==========================================
 class ChatRequest(BaseModel):
     message: str
-    user_id: str  # 👈 フロントから誰のメッセージか受け取るための「名札」
+    user_id: str  
+    level: str
 
 @app.get("/")
 def read_root():
@@ -100,9 +101,36 @@ async def chat_endpoint(request: ChatRequest):
         raise HTTPException(status_code=500, detail="Gemini API is not configured")
 
     try:
-        # AIに聞く
-        response = model.generate_content(request.message)
+        # 🌟 ユーザーが選んだレベルに合わせて指示書（システムプロンプト）を動的に作成
+        instruction = f"""
+        あなたは第二言語習得論（SLA）の第一人者であり、仕事で英語が必要な日本のビジネスパーソンを「{request.level}」へ導くプロの専属英語コーチです。
+
+        【ミッションと対話のルール】
+        １．ユーザーの目標レベル（{request.level}）に合わせて、使う単語の難易度や文法の複雑さを調整してください。初級者には中学英語ベースで優しく、上級者にはネイティブレベルの洗練された表現で応じてください。
+        
+        ２．SLAに基づいた指導：
+        ・「大量のインプットと、必要に迫られたアウトプット」の原則に従い、ビジネスシーンで実際に使う表現を引き出してください。
+        ・Versantスコアに直結する「流暢さ」「発音」「語彙」「文章構文」を意識した指導を行ってください。
+
+        ３．返答のフォーマット（厳守）：
+        ・必ず最初に【英語】で返答し、次に【日本語の自然な翻訳】をつけてください。
+        ・返信の最後に必ず【Coach's Advice】というセクションを作り、以下をまとめてください。
+          - 訂正と解説：ユーザーの英語を論理的に修正し、目標レベルにふさわしい表現を提案する。
+          - 学習リマインド：次に行うべきトレーニングを提示する。
+        """
+
+        # 🌟 指示書を適用したモデルを作成
+        dynamic_model = genai.GenerativeModel(
+            model_name='gemini-2.5-flash', # またはお使いのモデル名
+            system_instruction=instruction
+        )
+
+        # 🌟 AIにチャットを投げ、返答を得る
+        response = dynamic_model.generate_content(request.message)
         ai_text = response.text
+        # AIに聞く
+        #response = model.generate_content(request.message)
+        #ai_text = response.text
         
         # 会話履歴をSupabaseに保存
         if supabase:

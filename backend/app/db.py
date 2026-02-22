@@ -7,7 +7,7 @@ load_dotenv()
 
 # 環境変数からURLとキーを取得
 url: str = os.environ.get("SUPABASE_URL")
-key: str = os.environ.get("SUPABASE_KEY")
+key: str = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("SUPABASE_KEY")
 
 # エラーハンドリング: キーがない場合に警告を出す
 if not url or not key:
