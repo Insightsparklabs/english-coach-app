@@ -135,7 +135,8 @@ else:
     if "messages" not in st.session_state:
         st.session_state.messages = []
         try:
-            response = requests.get(f"{BACKEND_BASE_URL}/history")
+            user_id = st.session_state.user.id
+            response = requests.get(f"{BACKEND_BASE_URL}/history/{user_id}")
             if response.status_code == 200:
                 past_chats = response.json()
                 for chat in past_chats:
@@ -155,7 +156,8 @@ else:
 
         try:
             with st.spinner("Coach is thinking..."):
-                response = requests.post(f"{BACKEND_BASE_URL}/chat", json={"message": prompt})
+                user_id = st.session_state.user.id
+                response = requests.post(f"{BACKEND_BASE_URL}/chat", json={"message": prompt, "user_id": user_id})
                 if response.status_code == 200:
                     ai_response = response.json().get("ai_response")
                     with st.chat_message("assistant"):
