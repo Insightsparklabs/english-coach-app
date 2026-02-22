@@ -17,6 +17,10 @@ services:
     build: ./frontend
     ports:
       - "8501:8501"
+    env_file:
+      - .env  # 👈 【超重要】フロントエンドにもこれを追加！！！
+    environment:
+      - BACKEND_BASE_URL=http://backend:8080  # 👈 【ここを追加！】Docker内での連絡先を上書きします
     volumes:
       - ./frontend:/app
     depends_on:
