@@ -7,6 +7,35 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# 1. ブラウザのタブとアイコンをg-book仕様に
+st.set_page_config(
+    page_title="g-book AI English Coach",
+    page_icon="🎓", # または 🦜
+    layout="centered"
+)
+
+# 2. ヘッダーを消して、独自のタイトルを設置する
+hide_style = """
+    <style>
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+    /* 少しだけタイトルの上の余白を削る */
+    .block-container {padding-top: 2rem;}
+    </style>
+"""
+st.markdown(hide_style, unsafe_allow_html=True)
+
+# 3. シンプルでプロっぽいタイトル表示
+st.markdown("""
+    <div style="text-align: center;">
+        <h1 style="color: #1E3A8A; margin-bottom: 0;">g-book AI English Coach</h1>
+        <p style="color: #6B7280; font-size: 1.1rem;">1年でVersant C1を目指す、あなた専用の伴走者</p>
+    </div>
+""", unsafe_allow_html=True)
+st.divider()
+
+
 # --- 環境変数の取得 ---
 BACKEND_BASE_URL = os.environ.get("BACKEND_BASE_URL", "http://localhost:8080").rstrip('/')
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
