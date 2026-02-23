@@ -6,14 +6,17 @@ import google.generativeai as genai
 from dotenv import load_dotenv
 from datetime import datetime, timezone, timedelta
 
+
 # クラウドでもエラーにならないインポート方法
 try:
-    from db import get_supabase_client
+    from .config import ADMIN_USER_ID, MODEL_NAME, model as gemini_base_model
+    from .db import get_supabase_client
+    from .prompts import get_coach_instruction
 except ImportError:
+    from app.config import ADMIN_USER_ID, MODEL_NAME, model as gemini_base_model
     from app.db import get_supabase_client
+    from app.prompts import get_coach_instruction
 
-# .env読み込み (ローカル用)
-load_dotenv()
 
 app = FastAPI()
 
@@ -29,23 +32,8 @@ app.add_middleware(
 # Supabaseクライアントを取得
 supabase = get_supabase_client()
 
-# 環境変数の取得
-API_KEY = os.environ.get("GOOGLE_API_KEY")
-ADMIN_USER_ID = os.environ.get("ADMIN_USER_ID")
-model = None
 
-if API_KEY:
-    try:
-        genai.configure(api_key=API_KEY)
-        MODEL_NAME = 'gemini-2.5-flash'
-        
-        # APIキーの有効性チェック用
-        model = genai.GenerativeModel(model_name=MODEL_NAME)
-        print(f"✅ Gemini ({MODEL_NAME}) initialized")
-    except Exception as e:
-        print(f"❌ Gemini Error: {e}")
-else:
-    print("⚠️ Warning: API KEY not found")
+
 
 # ==========================================
 # チャットのデータ形式
@@ -66,7 +54,7 @@ def read_root():
 
 @app.post("/chat")
 async def chat_endpoint(request: ChatRequest):
-    if not model:
+    if not gemini_base_model:
         raise HTTPException(status_code=500, detail="Gemini API is not configured")
 
     try:
@@ -103,37 +91,9 @@ async def chat_endpoint(request: ChatRequest):
                 except Exception as db_err:
                     print(f"✖ Count Check Error: {db_err}")
 
-        # ==========================================
-        # 🌟 あなたのこだわり指示書を全部乗せした最強プロンプト
-        # ==========================================
-        instruction = f"""
-        あなたは第二言語習得論（SLA）の第一人者であり、仕事で英語が必要な日本のビジネスパーソンを専属で指導するプロの英語コーチです。
-        現在のユーザーの目標レベルは「{request.level}」です。
-
-        【ミッションと対話のルール】
-        １．レベルに合わせた対応：
-        目標レベル（{request.level}）に合わせて、使う単語の難易度や文法の複雑さを調整してください。初級者には中学英語ベースで優しく、上級者にはネイティブレベルの洗練された表現で応じてください。
-
-        ２．初期アセスメントと学習計画：
-        初めての会話（またはユーザーがテストを希望した際）では、まず簡単なスピーキングテスト（業務内容の英語での説明など）を実施して現在地を測り、「1日に確保できる学習時間」をヒアリングしてください。その後、1年でVersant C1に到達するためのマイルストーンを提示してください。
-
-        ３．SLAに基づいた指導：
-        ・「大量のインプットと、必要に迫られたアウトプット」の原則に従い、ビジネスシーンで実際に使う表現を引き出してください。
-        ・Versantスコアに直結する「流暢さ（Fluency）」「発音（Pronunciation）」「語彙（Vocabulary）」「文章構文（Sentence Mastery）」の4項目を意識した指導を行ってください。
-
-        ４．返答のフォーマット（厳守）：
-        ・必ず最初に【英語】で返答し、次に【日本語の自然な翻訳】をつけてください。
-        ・返信の最後に必ず【Coach's Advice】というセクションを作り、以下を簡潔にまとめてください。
-          - 訂正と解説：ユーザーの英語の不自然な箇所をSLAの「明示的フィードバック」として論理的に修正し、より洗練されたビジネス表現を提案する。
-          - 学習リマインド：ヒアリングした学習時間をもとに、「明日の朝の通勤電車では〇〇のシャドーイングをしましょう」といった具体的な行動を促す。
-
-        ５．スタンス：
-        ・大人向けのコーチングとして、単なる励ましだけでなく「なぜこのトレーニングが脳の言語習得に効くのか」という科学的・論理的な説明を交えてください。
-        ・多忙なビジネスパーソンであることを理解し、挫折させないよう、常にプロフェッショナルで伴走者としての温かいトーンを保ってください。
-        """
-
+        instruction = get_coach_instruction(request.level)
         dynamic_model = genai.GenerativeModel(
-            model_name='gemini-2.5-flash', 
+            model_name=MODEL_NAME, 
             system_instruction=instruction
         )
 
