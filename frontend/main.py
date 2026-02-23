@@ -7,54 +7,92 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# 1. ブラウザのタブとアイコンをg-book仕様に
-st.set_page_config(
-    page_title="g-book AI English Coach",
-    page_icon="🎓", # または 🦜
-    layout="centered"
-)
+# ==========================================
+# 1. 初期設定とUIパーツの定義
+# ==========================================
+st.set_page_config(page_title="g-book AI English Coach", page_icon="🎓", layout="centered")
 
-# 2. ヘッダーを消して、独自のタイトルを設置する
-hide_style = """
-    <style>
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    header {visibility: hidden;}
-    /* 少しだけタイトルの上の余白を削る */
-    .block-container {padding-top: 2rem;}
-    </style>
-"""
-st.markdown(hide_style, unsafe_allow_html=True)
+def apply_custom_css():
+    """不要なヘッダーを隠し、広告用のスタイルを適用する"""
+    st.markdown("""
+        <style>
+        #MainMenu {visibility: hidden;}
+        footer {visibility: hidden;}
+        header {visibility: hidden;}
+        
+        /* 画面上部に固定するコンテナ */
+        .fixed-ad-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            background-color: #001f3f;
+            z-index: 99999; /* 念のためZインデックスをさらに強くしました */
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 5px 0;
+            border-bottom: 2px solid #c9a063;
+            box-shadow: 0px 2px 10px rgba(0,0,0,0.3);
+        }
+        .pr-label {
+            color: #ffffff;
+            font-size: 10px;
+            opacity: 0.8;
+            margin-bottom: 2px;
+            letter-spacing: 1px;
+        }
+        .main .block-container {
+            padding-top: 100px !important;
+        }
+        .fixed-ad-container img {
+            max-height: 50px;
+            width: auto;
+        }
+        </style>
+    """, unsafe_allow_html=True)
 
-# 3. シンプルでプロっぽいタイトル表示
-st.markdown("""
-    <div style="text-align: center;">
-        <h1 style="color: #1E3A8A; margin-bottom: 0;">g-book AI English Coach</h1>
-        <p style="color: #6B7280; font-size: 1.1rem;">1年でVersant C1を目指す、あなた専用の伴走者</p>
-    </div>
-""", unsafe_allow_html=True)
-st.divider()
+def display_fixed_ad():
+    """画面上部に常に表示される広告バナー"""
+    st.markdown("""
+        <div class="fixed-ad-container">
+            <div class="pr-label">【PR】</div>
+            <a href="https://px.a8.net/svt/ejp?a8mat=3TLJ5G+1PCPWA+4MWC+601S1" rel="nofollow">
+            <img border="0" width="320" height="50" alt="" src="https://www27.a8.net/svt/bgt?aid=231111988103&wid=050&eno=01&mid=s00000021630001008000&mc=1"></a>
+            <img border="0" width="1" height="1" src="https://www12.a8.net/0.gif?a8mat=3TLJ5G+1PCPWA+4MWC+601S1" alt="">        
+        </div>
+    """, unsafe_allow_html=True)
 
+def display_main_header():
+    """アプリのメインタイトル"""
+    st.markdown("""
+        <div style="text-align: center;">
+            <h1 style="color: #1E3A8A; margin-bottom: 0;">g-book AI English Coach</h1>
+            <p style="color: #6B7280; font-size: 1.1rem;">1年でVersant C1を目指す、あなた専用の伴走者</p>
+        </div>
+    """, unsafe_allow_html=True)
+    st.divider()
+
+# 🌟 ベースのCSSだけをここで適用（広告はまだ呼ばない）
+apply_custom_css()
 
 # --- 環境変数の取得 ---
 BACKEND_BASE_URL = os.environ.get("BACKEND_BASE_URL", "http://localhost:8080").rstrip('/')
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
-# 🌟 本番環境とローカル環境を自動で切り替えるためのURL
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:8501").rstrip('/')
 
 # ==========================================
-# 🌟 新しい仕組み：セキュリティを守りつつ、Googleログインを成功させる特殊な記憶領域
+# 🌟 特殊な記憶領域の設定
 # ==========================================
 @st.cache_resource
 def get_global_verifier_store():
-    # Googleの「合い言葉」だけを一時的に保持する金庫
     return {}
 
 class SecureStorage:
     def __init__(self):
-        self.local_store = {} # ユーザー個人の秘密の記憶（他人に絶対見えない）
-        self.global_store = get_global_verifier_store() # 合い言葉用の一時記憶
+        self.local_store = {} 
+        self.global_store = get_global_verifier_store() 
 
     def get_item(self, key):
         if "code-verifier" in key:
@@ -76,27 +114,24 @@ class SecureStorage:
 # --- Supabaseの準備 ---
 def init_supabase():
     if SUPABASE_URL and SUPABASE_KEY:
-        # 🌟 先ほど作った特殊な記憶領域をSupabaseに組み込む
         options = ClientOptions(storage=SecureStorage())
         return create_client(SUPABASE_URL, SUPABASE_KEY, options=options)
     return None
 
 supabase = init_supabase()
 
-# --- 状態管理（ログインしているかどうか） ---
+# --- 状態管理 ---
 if "user" not in st.session_state:
     st.session_state.user = None
 
 # ==========================================
-# Googleからの帰り道（リダイレクト）をキャッチする
+# Googleログインのリダイレクトキャッチ
 # ==========================================
 if "code" in st.query_params:
     try:
         auth_code = st.query_params["code"]
         if supabase:
-            response = supabase.auth.exchange_code_for_session({
-                "auth_code": auth_code
-            })
+            response = supabase.auth.exchange_code_for_session({"auth_code": auth_code})
         if response:    
             st.session_state.user = response.user
             st.query_params.clear()
@@ -104,14 +139,15 @@ if "code" in st.query_params:
     except Exception as e:
         st.warning("ログインセッションの有効期限が切れました。もう一度お試しください")
         st.query_params.clear()
-        st.error(f"詳細えらー: {e}")
 
 # ==========================================
 # 画面A：ログインしていない時
 # ==========================================
 if st.session_state.user is None:
-    st.title("English Coach AI 🤖")
-    
+    # 🌟 タイトルを表示してから、その直下で広告を呼び出す！（元のあなたの正解ルート）
+    display_main_header()
+    display_fixed_ad()
+
     tab_login, tab_signup, tab_reset = st.tabs(["🔑 ログイン", "📝 新規登録", "❓ パスワードを忘れた方"])
 
     with tab_login:
@@ -120,7 +156,7 @@ if st.session_state.user is None:
             try:
                 res = supabase.auth.sign_in_with_oauth({
                     "provider": "google",
-                    "options": {"redirect_to": FRONTEND_URL} # 🌟 変数を使用
+                    "options": {"redirect_to": FRONTEND_URL} 
                 })
                 st.link_button("🌐 Googleでログイン", res.url, use_container_width=True)
                 st.divider()
@@ -157,12 +193,10 @@ if st.session_state.user is None:
     with tab_reset:
         st.subheader("パスワードの再設定")
         
-        # 1. メールアドレスを入力してコードを受け取る
         reset_email = st.text_input("登録しているメールアドレス", key="reset_email_input")
         if st.button("確認コードをメールに送信"):
             if supabase:
                 try:
-                    # OTP（6桁のコード）を送信する
                     supabase.auth.reset_password_for_email(reset_email)
                     st.success("✉️ 確認コードを送信しました！メールをご確認ください。")
                 except Exception as e:
@@ -170,7 +204,6 @@ if st.session_state.user is None:
 
         st.divider()
 
-        # 2. メールに届いたコードと、新しいパスワードを入力する
         st.markdown("#### 新しいパスワードの設定")
         otp_code = st.text_input("メールに届いた6桁のコード", key="otp_code")
         new_password = st.text_input("新しいパスワード (6文字以上)", type="password", key="new_pw_reset")
@@ -180,16 +213,8 @@ if st.session_state.user is None:
                 st.warning("コードと新しいパスワードを入力してください。")
             elif supabase:
                 try:
-                    # ① 6桁のコード（OTP）を使って一時的に認証を通す
-                    supabase.auth.verify_otp({
-                        "email": reset_email, 
-                        "token": otp_code, 
-                        "type": "recovery"
-                    })
-                    
-                    # ② そのままパスワードを上書き更新する
+                    supabase.auth.verify_otp({"email": reset_email, "token": otp_code, "type": "recovery"})
                     supabase.auth.update_user({"password": new_password})
-                    
                     st.success("✅ パスワードの変更が完了しました！上の「🔑 ログイン」タブから新しいパスワードでログインしてください。")
                 except Exception as e:
                     st.error(f"❌ エラー: コードが間違っているか、有効期限切れです ({e})")
@@ -210,7 +235,7 @@ else:
                 "中級 (B1-B2: ビジネスで通用するレベル)", 
                 "上級 (Versant C1: プロフェッショナル)"
             ],
-            index=2  # デフォルトを C1 に設定
+            index=2 
         )
         st.divider()
 
@@ -231,10 +256,10 @@ else:
                 except Exception as e:
                     st.error(f"更新に失敗しました: {e}")
 
-    # --- チャット画面本体 ---
-    st.title("English Coach AI 🤖")
-    st.caption("あなたの優しい英会話コーチです。")
-    
+    # 🌟 タイトルを表示してから、その直下で広告を呼び出す！（元のあなたの正解ルート）
+    display_main_header()
+    display_fixed_ad()
+
     if "messages" not in st.session_state:
         st.session_state.messages = []
         try:
@@ -260,11 +285,10 @@ else:
         try:
             with st.spinner("Coach is thinking..."):
                 user_id = st.session_state.user.id
-                # 🌟 ここで level を含めた JSON を作る！
                 payload = {
                     "message": prompt, 
                     "user_id": user_id,
-                    "level": target_level  # 👈 変数 target_level を送る
+                    "level": target_level 
                 }
                 response = requests.post(f"{BACKEND_BASE_URL}/chat", json=payload)
                 
