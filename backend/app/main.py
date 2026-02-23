@@ -4,8 +4,9 @@ from pydantic import BaseModel
 import os
 import google.generativeai as genai
 from dotenv import load_dotenv
+from datetime import datetime, timezone, timedelta
 
-# 修正1: クラウドでもエラーにならないインポート方法
+# クラウドでもエラーにならないインポート方法
 try:
     from db import get_supabase_client
 except ImportError:
@@ -25,53 +26,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 1. Supabaseクライアントを取得
+# Supabaseクライアントを取得
 supabase = get_supabase_client()
 
-# 修正2: クラウドでの設定名(GOOGLE_API_KEY)にも対応させる
+# 環境変数の取得
 API_KEY = os.environ.get("GOOGLE_API_KEY")
+ADMIN_USER_ID = os.environ.get("ADMIN_USER_ID")
 model = None
 
 if API_KEY:
     try:
         genai.configure(api_key=API_KEY)
-        
-        # 修正3: エラーの元凶「2.5」を、実在する「1.5-flash」に変更！（※現在2.5もリリースされているのでこのままでも動きます！）
         MODEL_NAME = 'gemini-2.5-flash'
         
-        #instruction = """
-        #あなたは非常に優秀な第二言語習得論の第一人者の日本人向け英会話コーチです。以下のルールを厳守してください：
-        #１．返答はまず英語で行い、その後に日本語の翻訳をつけてください。
-        #２．ユーザーの英語の文法ミスやもっと自然な言い回しがある場合は、返信の最後に[Coach's Advice]というコーナーを作って優しく解説してください。
-        #３．ユーザーの英語レベルが初級だと想定し、難しすぎる単語や複雑な構文は避けてください。
-        #４．常に励ましの言葉をかけ、ユーザーが英語を話すのが楽しくなるようにしてください。
-        #"""
-        instruction = """
-        あなたは第二言語習得論（SLA）の第一人者であり、仕事で英語が必要な日本のビジネスパーソンを「1年でVersant C1レベル」へ導くプロの専属英語コーチです。
-
-        【ミッションと対話のルール】
-        １．初期アセスメントと学習計画：
-        初めての会話（またはユーザーがテストを希望した際）では、まず簡単なスピーキングテスト（業務内容の英語での説明など）を実施して現在地を測り、「1日に確保できる学習時間」をヒアリングしてください。その後、1年でVersant C1に到達するためのマイルストーンを提示してください。
-
-        ２．SLAに基づいた指導：
-        ・「大量のインプットと、必要に迫られたアウトプット」の原則に従い、ビジネスシーンで実際に使う表現を引き出してください。
-        ・Versantスコアに直結する「流暢さ（Fluency）」「発音（Pronunciation）」「語彙（Vocabulary）」「文章構文（Sentence Mastery）」の4項目を意識した指導を行ってください。
-
-        ３．返答のフォーマット（厳守）：
-        ・必ず最初に【英語】で返答し、次に【日本語の自然な翻訳】をつけてください。
-        ・返信の最後に必ず【Coach's Advice】というセクションを作り、以下を簡潔にまとめてください。
-          - 訂正と解説：ユーザーの英語の不自然な箇所をSLAの「明示的フィードバック」として論理的に修正し、より洗練されたビジネス表現を提案する。
-          - 学習リマインド：ヒアリングした学習時間をもとに、「明日の朝の通勤電車では〇〇のシャドーイングをしましょう」といった具体的な行動を促す。
-
-        ４．スタンス：
-        ・大人向けのコーチングとして、単なる励ましだけでなく「なぜこのトレーニングが脳の言語習得に効くのか」という科学的・論理的な説明を交えてください。
-        ・多忙なビジネスパーソンであることを理解し、挫折させないよう、常にプロフェッショナルで伴走者としての温かいトーンを保ってください。
-        """
-
-        model = genai.GenerativeModel(
-            model_name=MODEL_NAME,
-            system_instruction=instruction
-        )
+        # APIキーの有効性チェック用
+        model = genai.GenerativeModel(model_name=MODEL_NAME)
         print(f"✅ Gemini ({MODEL_NAME}) initialized")
     except Exception as e:
         print(f"❌ Gemini Error: {e}")
@@ -79,7 +48,7 @@ else:
     print("⚠️ Warning: API KEY not found")
 
 # ==========================================
-# 🌟 修正：チャットのデータ形式に user_id を追加
+# チャットのデータ形式
 # ==========================================
 class ChatRequest(BaseModel):
     message: str
@@ -101,48 +70,85 @@ async def chat_endpoint(request: ChatRequest):
         raise HTTPException(status_code=500, detail="Gemini API is not configured")
 
     try:
-        # 🌟 ユーザーが選んだレベルに合わせて指示書（システムプロンプト）を動的に作成
+        # ==========================================
+        # 👑 1日50回制限 ＆ VIPユーザー特別扱いロジック
+        # ==========================================
+        if request.user_id != ADMIN_USER_ID:
+            if supabase:
+                try:
+                    JST = timezone(timedelta(hours=9), 'JST')
+                    now = datetime.now(JST)
+                    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+
+                    count_res = supabase.table("chat_history") \
+                        .select("id", count="exact") \
+                        .eq("user_id", request.user_id) \
+                        .gte("created_at", today_start) \
+                        .execute()
+                    
+                    daily_count = count_res.count
+
+                    if daily_count >= 50:
+                        limit_msg = (
+                            "🤖 **コーチからのお知らせ：**\n\n"
+                            "本日のアルファ版特別枠（50回）を使い切りました！\n"
+                            "ものすごい学習量ですね！無料でここまで使い倒していただき嬉しいです。\n\n"
+                            "💡 *本気で学習を加速させたい方へ：*\n"
+                            "画面上部の「LIBERTY ENGLISH」の無料カウンセリングで、プロに学習計画を作ってもらうのもおすすめです！続きはまた明日お話ししましょう！"
+                        )
+                        return {
+                            "user_message": request.message,
+                            "ai_response": limit_msg
+                        }
+                except Exception as db_err:
+                    print(f"✖ Count Check Error: {db_err}")
+
+        # ==========================================
+        # 🌟 あなたのこだわり指示書を全部乗せした最強プロンプト
+        # ==========================================
         instruction = f"""
-        あなたは第二言語習得論（SLA）の第一人者であり、仕事で英語が必要な日本のビジネスパーソンを「{request.level}」へ導くプロの専属英語コーチです。
+        あなたは第二言語習得論（SLA）の第一人者であり、仕事で英語が必要な日本のビジネスパーソンを専属で指導するプロの英語コーチです。
+        現在のユーザーの目標レベルは「{request.level}」です。
 
         【ミッションと対話のルール】
-        １．ユーザーの目標レベル（{request.level}）に合わせて、使う単語の難易度や文法の複雑さを調整してください。初級者には中学英語ベースで優しく、上級者にはネイティブレベルの洗練された表現で応じてください。
-        
-        ２．SLAに基づいた指導：
-        ・「大量のインプットと、必要に迫られたアウトプット」の原則に従い、ビジネスシーンで実際に使う表現を引き出してください。
-        ・Versantスコアに直結する「流暢さ」「発音」「語彙」「文章構文」を意識した指導を行ってください。
+        １．レベルに合わせた対応：
+        目標レベル（{request.level}）に合わせて、使う単語の難易度や文法の複雑さを調整してください。初級者には中学英語ベースで優しく、上級者にはネイティブレベルの洗練された表現で応じてください。
 
-        ３．返答のフォーマット（厳守）：
+        ２．初期アセスメントと学習計画：
+        初めての会話（またはユーザーがテストを希望した際）では、まず簡単なスピーキングテスト（業務内容の英語での説明など）を実施して現在地を測り、「1日に確保できる学習時間」をヒアリングしてください。その後、1年でVersant C1に到達するためのマイルストーンを提示してください。
+
+        ３．SLAに基づいた指導：
+        ・「大量のインプットと、必要に迫られたアウトプット」の原則に従い、ビジネスシーンで実際に使う表現を引き出してください。
+        ・Versantスコアに直結する「流暢さ（Fluency）」「発音（Pronunciation）」「語彙（Vocabulary）」「文章構文（Sentence Mastery）」の4項目を意識した指導を行ってください。
+
+        ４．返答のフォーマット（厳守）：
         ・必ず最初に【英語】で返答し、次に【日本語の自然な翻訳】をつけてください。
-        ・返信の最後に必ず【Coach's Advice】というセクションを作り、以下をまとめてください。
-          - 訂正と解説：ユーザーの英語を論理的に修正し、目標レベルにふさわしい表現を提案する。
-          - 学習リマインド：次に行うべきトレーニングを提示する。
+        ・返信の最後に必ず【Coach's Advice】というセクションを作り、以下を簡潔にまとめてください。
+          - 訂正と解説：ユーザーの英語の不自然な箇所をSLAの「明示的フィードバック」として論理的に修正し、より洗練されたビジネス表現を提案する。
+          - 学習リマインド：ヒアリングした学習時間をもとに、「明日の朝の通勤電車では〇〇のシャドーイングをしましょう」といった具体的な行動を促す。
+
+        ５．スタンス：
+        ・大人向けのコーチングとして、単なる励ましだけでなく「なぜこのトレーニングが脳の言語習得に効くのか」という科学的・論理的な説明を交えてください。
+        ・多忙なビジネスパーソンであることを理解し、挫折させないよう、常にプロフェッショナルで伴走者としての温かいトーンを保ってください。
         """
 
-        # 🌟 指示書を適用したモデルを作成
         dynamic_model = genai.GenerativeModel(
-            model_name='gemini-2.5-flash', # またはお使いのモデル名
+            model_name='gemini-2.5-flash', 
             system_instruction=instruction
         )
 
-        # 🌟 AIにチャットを投げ、返答を得る
         response = dynamic_model.generate_content(request.message)
         ai_text = response.text
-        # AIに聞く
-        #response = model.generate_content(request.message)
-        #ai_text = response.text
         
         # 会話履歴をSupabaseに保存
         if supabase:
             try:
-                # 🌟 修正：データベースに保存するときに user_id も一緒に書き込む
                 data ={
-                    "user_id": request.user_id, # 👈 これを追加！
+                    "user_id": request.user_id, 
                     "user_message": request.message,
                     "ai_response": ai_text
                 }
                 supabase.table("chat_history").insert(data).execute()
-                print(f"✅ saved to Supabase for user: {request.user_id}")
             except Exception as db_err:
                 print(f"✖ Database Save Error: {db_err}")
 
@@ -152,19 +158,17 @@ async def chat_endpoint(request: ChatRequest):
         }
     except Exception as e:
         print(f"✖ Chat Error: {e}")
-        # クラウドで原因が特定できるように、エラー詳細を返す
         raise HTTPException(status_code=500, detail=str(e))
 
 # ==========================================
-# 🌟 修正：履歴取得時に user_id を受け取って絞り込む
+# 履歴取得
 # ==========================================
-@app.get("/history/{user_id}") # 👈 URLの末尾にIDをつけてもらう設計に変更
+@app.get("/history/{user_id}") 
 async def get_history(user_id: str):
     if not supabase:
         raise HTTPException(status_code=500, detail="Supabase is not configured")
         
     try:
-        # 🌟 修正：.eq("user_id", user_id) を追加して「この人のデータだけ」に絞り込む
         response = supabase.table("chat_history") \
             .select("*") \
             .eq("user_id", user_id) \
@@ -172,5 +176,4 @@ async def get_history(user_id: str):
             .execute()
         return response.data
     except Exception as e:
-        print(f"✖ Fetch History Error {e}")
         return {"error": str(e)}
