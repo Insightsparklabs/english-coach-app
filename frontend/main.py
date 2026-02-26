@@ -21,7 +21,7 @@ st.set_page_config(page_title="g-book AI English Coach", page_icon="🎓", layou
 apply_custom_css()
 
 # --- 環境変数の取得 ---
-BACKEND_BASE_URL = os.environ.get("BACKEND_BASE_URL", "http://localhost:8080").rstrip('/')
+BACKEND_BASE_URL = os.environ.get("BACKEND_BASE_URL", "http://backend:8080").rstrip('/')
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:8501").rstrip('/')
@@ -177,9 +177,9 @@ else:
             [
                 "初級 (A1-A2: 基礎からやり直し)", 
                 "中級 (B1-B2: ビジネスで通用するレベル)", 
-                "上級 (Versant C1: プロフェッショナル)"
+                "上級 (CEFER C1: プロフェッショナル)"
             ],
-            index=2 
+            index=0 
         )
         st.divider()
 
@@ -216,16 +216,58 @@ else:
                     st.session_state.messages.append({"role": "assistant", "content": chat["ai_response"]})
         except Exception as e:
             st.error(f"履歴の読み込みに失敗しました: {e}")
+    
+    # ==========================================
+    # 🌟 UI改善1: 過去の履歴を折りたたむ
+    # ==========================================
+    # メッセージが5件以上（2往復半以上）ある場合、古いものを隠す
+    if len(st.session_state.messages) > 4:
+        with st.expander("📜 過去のコーチング履歴を表示", expanded=False):
+            for message in st.session_state.messages[:-4]:
+                with st.chat_message(message["role"]):
+                    st.markdown(message["content"])
+        
+        # 最新の4件（2往復分）だけを常に外に出して表示
+        for message in st.session_state.messages[-4:]:
+            with st.chat_message(message["role"]):
+                st.markdown(message["content"])
+    else:
+        # メッセージが少ないうちはそのまま全て表示
+        for message in st.session_state.messages:
+            with st.chat_message(message["role"]):
+                st.markdown(message["content"])
 
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+    # ==========================================
+    # 🌟 UI改善2: クイックスタートボタン
+    # ==========================================
+    st.write("---")
+    st.caption("👇 コーチに何を相談しますか？（ボタンを押すと自動で送信されます）")
+    
+    col1, col2, col3 = st.columns(3)
+    quick_prompt = None
+    
+    with col1:
+        if st.button("📏 実力判定テスト", use_container_width=True):
+            quick_prompt = "現在の英語力を測るための簡単なテストを開始してください。"
+    with col2:
+        if st.button("📅 今日の学習報告", use_container_width=True):
+            quick_prompt = "今日の英語学習の報告をします。アドバイスをください。"
+    with col3:
+        if st.button("✍️ 英文の添削依頼", use_container_width=True):
+            quick_prompt = "仕事で使う英文を作成しました。より自然な表現に添削してください。"
 
-    if prompt := st.chat_input("How are you today?"):
+    # ==========================================
+    # チャット入力と送信処理
+    # ==========================================
+    # 手動入力(chat_input) または ボタン押下(quick_prompt) で発火
+    if prompt := (st.chat_input("メッセージを入力... (例: How are you today?)") or quick_prompt):
+        
+        # ユーザーのメッセージを画面に追加
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
 
+        # AIの思考中スピナーを表示
         try:
             with st.spinner("Coach is thinking..."):
                 user_id = st.session_state.user.id
@@ -234,14 +276,20 @@ else:
                     "user_id": user_id,
                     "level": target_level 
                 }
+                # バックエンドへリクエスト
                 response = requests.post(f"{BACKEND_BASE_URL}/chat", json=payload)
                 
                 if response.status_code == 200:
                     ai_response = response.json().get("ai_response")
                     with st.chat_message("assistant"):
                         st.markdown(ai_response)
+                    
+                    # 履歴に保存
                     st.session_state.messages.append({"role": "assistant", "content": ai_response})
+                    
+                    # 🌟 重要: 画面をリフレッシュして最新状態（折りたたみなど）を再計算
+                    st.rerun()
                 else:
-                    st.error("コーチが席を外しているようです。")
+                    st.error("コーチが一時的に席を外しているようです。")
         except Exception as e:
             st.error(f"接続に失敗しました：{e}")
