@@ -5,9 +5,9 @@ import os
 import google.generativeai as genai
 from dotenv import load_dotenv
 from datetime import datetime, timezone, timedelta
+import traceback
 
-
-# クラウドでもエラーにならないインポート方法
+# 設定とプロンプトの読み込み
 try:
     from .config import ADMIN_USER_ID, MODEL_NAME, model as gemini_base_model
     from .db import get_supabase_client
@@ -16,7 +16,6 @@ except ImportError:
     from app.config import ADMIN_USER_ID, MODEL_NAME, model as gemini_base_model
     from app.db import get_supabase_client
     from app.prompts import get_coach_instruction
-
 
 app = FastAPI()
 
@@ -29,111 +28,118 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Supabaseクライアントを取得
 supabase = get_supabase_client()
 
+# 🌟 起動時にモデル一覧を表示（デバッグ用）
+@app.on_event("startup")
+async def list_models():
+    print("--- 🔍 利用可能なGoogle AIモデル一覧 ---")
+    try:
+        for m in genai.list_models():
+            if 'generateContent' in m.supported_generation_methods:
+                print(f"✅ {m.name}")
+    except Exception as e:
+        print(f"❌ モデルリスト取得失敗: {e}")
+    print("---------------------------------------")
 
-
-
-# ==========================================
-# チャットのデータ形式
-# ==========================================
+# 🌟 ChatRequestを統合（一つにまとめました）
 class ChatRequest(BaseModel):
     message: str
     user_id: str  
     level: str
+    mode: str = "assessment" 
 
 @app.get("/")
 def read_root():
     db_status = "Connected" if supabase else "Disconnected"
-    return {
-        "status": "ok", 
-        "message": "English Coach AI Backend is running",
-        "database": db_status
-    }
+    return {"status": "ok", "database": db_status}
 
 @app.post("/chat")
-async def chat_endpoint(request: ChatRequest):
+async def chat_endpoint(payload: ChatRequest):
     if not gemini_base_model:
         raise HTTPException(status_code=500, detail="Gemini API is not configured")
 
     try:
-        # ==========================================
-        # 👑 1日50回制限 ＆ VIPユーザー特別扱いロジック
-        # ==========================================
-        if request.user_id != ADMIN_USER_ID:
-            if supabase:
-                try:
-                    JST = timezone(timedelta(hours=9), 'JST')
-                    now = datetime.now(JST)
-                    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+        # 1. 👑 1日50回制限チェック
+        if payload.user_id != ADMIN_USER_ID and supabase:
+            JST = timezone(timedelta(hours=9), 'JST')
+            now = datetime.now(JST)
+            today_start = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
 
-                    count_res = supabase.table("chat_history") \
-                        .select("id", count="exact") \
-                        .eq("user_id", request.user_id) \
-                        .gte("created_at", today_start) \
-                        .execute()
-                    
-                    daily_count = count_res.count
+            count_res = supabase.table("chat_history") \
+                .select("id", count="exact") \
+                .eq("user_id", payload.user_id) \
+                .gte("created_at", today_start) \
+                .execute()
+            
+            if count_res.count >= 50:
+                return {
+                    "user_message": payload.message,
+                    "ai_response": "🤖 **コーチからのお知らせ：**\n\n本日の無料枠（50回）を使い切りました！また明日お話ししましょう！"
+                }
 
-                    if daily_count >= 50:
-                        limit_msg = (
-                            "🤖 **コーチからのお知らせ：**\n\n"
-                            "本日のアルファ版特別枠（50回）を使い切りました！\n"
-                            "ものすごい学習量ですね！無料でここまで使い倒していただき嬉しいです。\n\n"
-                            "💡 *本気で学習を加速させたい方へ：*\n"
-                            "画面上部の「LIBERTY ENGLISH」の無料カウンセリングで、プロに学習計画を作ってもらうのもおすすめです！続きはまた明日お話ししましょう！"
-                        )
-                        return {
-                            "user_message": request.message,
-                            "ai_response": limit_msg
-                        }
-                except Exception as db_err:
-                    print(f"✖ Count Check Error: {db_err}")
+        # 2. 🧠 会話履歴（記憶）の取得（直近5往復分）
+        gemini_history = []
+        if supabase:
+            try:
+                hist_res = supabase.table("chat_history") \
+                    .select("user_message", "ai_response") \
+                    .eq("user_id", payload.user_id) \
+                    .order("created_at", desc=False) \
+                    .limit(5).execute()
+                
+                for row in hist_res.data:
+                    gemini_history.append({"role": "user", "parts": [str(row["user_message"])]})
+                    gemini_history.append({"role": "model", "parts": [str(row["ai_response"])]})
+            except Exception as e:
+                print(f"✖ History Fetch Error: {e}")
 
-        instruction = get_coach_instruction(request.level)
+        # 3. 🎭 プロンプトとモデルの準備
+        # 🌟 mode を渡して、専用の指示書を取得します
+        instruction = get_coach_instruction(payload.level, payload.mode)
         dynamic_model = genai.GenerativeModel(
             model_name=MODEL_NAME, 
             system_instruction=instruction
         )
 
-        response = dynamic_model.generate_content(request.message)
+        # 4. 💬 記憶を持たせたチャットセッションの開始
+        chat_session = dynamic_model.start_chat(history=gemini_history)
+        response = chat_session.send_message(payload.message)
         ai_text = response.text
         
-        # 会話履歴をSupabaseに保存
+        # 5. 💾 会話履歴をSupabaseに保存
         if supabase:
             try:
                 data ={
-                    "user_id": request.user_id, 
-                    "user_message": request.message,
+                    "user_id": payload.user_id, 
+                    "user_message": payload.message,
                     "ai_response": ai_text
                 }
                 supabase.table("chat_history").insert(data).execute()
-            except Exception as db_err:
-                print(f"✖ Database Save Error: {db_err}")
+            except Exception as e:
+                print(f"✖ Database Save Error: {e}")
 
         return {
-            "user_message": request.message,
+            "user_message": payload.message,
             "ai_response": ai_text
         }
-    except Exception as e:
-        print(f"✖ Chat Error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
-# ==========================================
-# 履歴取得
-# ==========================================
+    except Exception as e:
+        print(f"✖ Chat Error Traceback:\n{traceback.format_exc()}")
+        # エラーメッセージを分かりやすく整形
+        err_msg = str(e)
+        if "429" in err_msg:
+            err_msg = "Google APIの回数制限です。少し待ってから再送してください。"
+        elif "404" in err_msg:
+            err_msg = f"モデル '{MODEL_NAME}' が見つかりません。config.pyを確認してください。"
+            
+        raise HTTPException(status_code=500, detail=err_msg)
+
 @app.get("/history/{user_id}") 
 async def get_history(user_id: str):
-    if not supabase:
-        raise HTTPException(status_code=500, detail="Supabase is not configured")
-        
+    if not supabase: return []
     try:
-        response = supabase.table("chat_history") \
-            .select("*") \
-            .eq("user_id", user_id) \
-            .order("created_at", desc=False) \
-            .execute()
+        response = supabase.table("chat_history").select("*").eq("user_id", user_id).order("created_at", desc=False).execute()
         return response.data
     except Exception as e:
         return {"error": str(e)}

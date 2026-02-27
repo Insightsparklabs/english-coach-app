@@ -56,7 +56,7 @@ def display_main_header():
     st.markdown("""
         <div style="text-align: center;">
             <h1 style="color: #1E3A8A; margin-bottom: 0;">g-book AI English Coach</h1>
-            <p style="color: #6B7280; font-size: 1.1rem;">1年でVersant C1を目指す、あなた専用の伴走者</p>
+            <p style="color: #6B7280; font-size: 1.1rem;">1年でCEFER C1を目指す、あなた専用の伴走者</p>
         </div>
     """, unsafe_allow_html=True)
     

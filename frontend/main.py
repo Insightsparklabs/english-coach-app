@@ -9,6 +9,12 @@ load_dotenv()
 
 from ui_components import apply_custom_css, display_fixed_ad, display_main_header
 
+# 🌟 判定テストの回答数を管理する変数を追加
+if "assessment_count" not in st.session_state:
+    st.session_state.assessment_count = 0
+
+# 判定テストの最大回数を定義
+MAX_ASSESSMENT_QUESTIONS = 5
 
 
 
@@ -21,7 +27,7 @@ st.set_page_config(page_title="g-book AI English Coach", page_icon="🎓", layou
 apply_custom_css()
 
 # --- 環境変数の取得 ---
-BACKEND_BASE_URL = os.environ.get("BACKEND_BASE_URL", "http://localhost:8080").rstrip('/')
+BACKEND_BASE_URL = os.environ.get("BACKEND_BASE_URL", "http://backend:8080").rstrip('/')
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:8501").rstrip('/')
@@ -172,15 +178,18 @@ else:
 
         st.divider()
         st.subheader("🎯 目標レベル設定")
-        target_level = st.selectbox(
+        # 🌟 後でプロンプトに使いやすいよう、短い形式も取得できるようにします
+        target_level_map = {
+            "初級 (A1-A2: 基礎からやり直し)": "A2",
+            "中級 (B1-B2: ビジネスで通用するレベル)": "B2",
+            "上級 (CEFER C1: プロフェッショナル)": "C1"
+        }
+        level_display = st.selectbox(
             "目指す英語レベルを選んでください",
-            [
-                "初級 (A1-A2: 基礎からやり直し)", 
-                "中級 (B1-B2: ビジネスで通用するレベル)", 
-                "上級 (Versant C1: プロフェッショナル)"
-            ],
-            index=2 
+            list(target_level_map.keys()),
+            index=0 
         )
+        target_level = target_level_map[level_display]
         st.divider()
 
         if st.button("ログアウト"):
@@ -188,60 +197,118 @@ else:
             st.session_state.user = None
             st.rerun()
 
-        st.divider()
-        st.subheader("⚙️ パスワード変更")
-        with st.form("update_password_form"):
-            new_pw = st.text_input("新しいパスワードを入力", type="password")
-            update_btn = st.form_submit_button("パスワードを更新する")
-            if update_btn and supabase:
-                try:
-                    supabase.auth.update_user({"password": new_pw})
-                    st.success("✅ パスワードを更新しました！")
-                except Exception as e:
-                    st.error(f"更新に失敗しました: {e}")
-
-    # 🌟 タイトルを表示してから、その直下で広告を呼び出す！（元のあなたの正解ルート）
+    # 🌟 ヘッダーと広告
     display_main_header()
     display_fixed_ad()
 
+    # --- 履歴の読み込み（初回のみ） ---
     if "messages" not in st.session_state:
         st.session_state.messages = []
         try:
-            user_id = st.session_state.user.id
-            response = requests.get(f"{BACKEND_BASE_URL}/history/{user_id}")
-            if response.status_code == 200:
-                past_chats = response.json()
-                for chat in past_chats:
-                    st.session_state.messages.append({"role": "user", "content": chat["user_message"]} )
-                    st.session_state.messages.append({"role": "assistant", "content": chat["ai_response"]})
+            resp = requests.get(f"{BACKEND_BASE_URL}/history/{st.session_state.user.id}")
+            if resp.status_code == 200:
+                past_data = resp.json()
+                for item in past_data:
+                    st.session_state.messages.append({"role": "user", "content": item["user_message"]})
+                    st.session_state.messages.append({"role": "assistant", "content": item["ai_response"]})
         except Exception as e:
-            st.error(f"履歴の読み込みに失敗しました: {e}")
+            st.error(f"履歴の読み込みエラー: {e}")
 
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+    # --- 履歴の表示 ---
+    if len(st.session_state.messages) > 4:
+        with st.expander("📜 過去のコーチング履歴を表示", expanded=False):
+            for message in st.session_state.messages[:-4]:
+                with st.chat_message(message["role"]):
+                    st.markdown(message["content"])
+        for message in st.session_state.messages[-4:]:
+            with st.chat_message(message["role"]):
+                st.markdown(message["content"])
+    else:
+        for message in st.session_state.messages:
+            with st.chat_message(message["role"]):
+                st.markdown(message["content"])
 
-    if prompt := st.chat_input("How are you today?"):
+    # --- モード選択とプログレスバー ---
+    if "current_mode" not in st.session_state:
+        st.session_state.current_mode = "assessment"
+
+    st.write("---")
+    st.caption("👇 コーチに何を相談しますか？")
+
+    row1_col1, row1_col2, row1_col3 = st.columns(3)
+    row2_col1, row2_col2 = st.columns(2)
+
+    quick_prompt = None
+
+    with row1_col1:
+        if st.button("📏 実力判定テスト", use_container_width=True):
+            st.session_state.current_mode = "assessment"
+            st.session_state.assessment_count = 0
+            quick_prompt = "現在の英語力を測るための簡単なテストを開始してください。"
+
+    with row1_col2:
+        if st.button("📈 CEFR C1特訓", use_container_width=True):
+            st.session_state.current_mode = "level_up"
+            quick_prompt = "CEFR C1レベルを目指す特訓をお願いします。"
+
+    with row1_col3:
+        if st.button("✍️ 英語日記サポート", use_container_width=True):
+            st.session_state.current_mode = "diary"
+            quick_prompt = "英語日記の作成をサポートしてください。"
+
+    with row2_col1:
+        if st.button("📅 今日の学習報告", use_container_width=True):
+            st.session_state.current_mode = "default"
+            quick_prompt = "今日の学習報告をします。"
+
+    with row2_col2:
+        if st.button("🔍 英文の添削依頼", use_container_width=True):
+            st.session_state.current_mode = "default"
+            quick_prompt = "英文を添削してください。"
+
+    # 📊 実力判定時のみプログレスバーを表示
+    if st.session_state.current_mode == "assessment":
+        progress = min(st.session_state.assessment_count / MAX_ASSESSMENT_QUESTIONS, 1.0)
+        st.write(f"📊 **実力判定の進捗: {st.session_state.assessment_count} / {MAX_ASSESSMENT_QUESTIONS}**")
+        st.progress(progress)
+        if st.session_state.assessment_count >= MAX_ASSESSMENT_QUESTIONS:
+            st.info("💡 十分な情報が集まりました。次の送信で判定結果が出ます！")
+
+# ==========================================
+    # チャット入力と送信処理
+    # ==========================================
+    if prompt := (st.chat_input("メッセージを入力...") or quick_prompt):
+        
+        # 🌟 送信前にカウントアップ（手動入力の時だけ）
+        if st.session_state.current_mode == "assessment" and not quick_prompt:
+            st.session_state.assessment_count += 1
+
+        # 1. ユーザーのメッセージを画面に追加
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
 
+        # 2. 5回目なら判定を促す指示を追加
+        final_prompt = prompt
+        if st.session_state.current_mode == "assessment" and st.session_state.assessment_count >= MAX_ASSESSMENT_QUESTIONS:
+            final_prompt += "\n(This is my final reply. Please provide my CEFR assessment now.)"
+
+        # 3. AIの思考中スピナーを表示
         try:
             with st.spinner("Coach is thinking..."):
-                user_id = st.session_state.user.id
                 payload = {
-                    "message": prompt, 
-                    "user_id": user_id,
-                    "level": target_level 
+                    "message": final_prompt, 
+                    "user_id": st.session_state.user.id,
+                    "level": target_level,
+                    "mode": st.session_state.current_mode # 🌟 モードを送信
                 }
                 response = requests.post(f"{BACKEND_BASE_URL}/chat", json=payload)
                 
                 if response.status_code == 200:
                     ai_response = response.json().get("ai_response")
-                    with st.chat_message("assistant"):
-                        st.markdown(ai_response)
                     st.session_state.messages.append({"role": "assistant", "content": ai_response})
+                    st.rerun() # 🌟 ここで画面を更新
                 else:
-                    st.error("コーチが席を外しているようです。")
+                    st.error("コーチが一時的に席を外しているようです。")
         except Exception as e:
             st.error(f"接続に失敗しました：{e}")

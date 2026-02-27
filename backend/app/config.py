@@ -10,7 +10,8 @@ API_KEY = os.environ.get("GOOGLE_API_KEY")
 ADMIN_USER_ID = os.environ.get("ADMIN_USER_ID")
 
 # Model Settings
-MODEL_NAME = 'gemini-2.5-flash'
+#MODEL_NAME = 'gemini-2.5-flash'
+MODEL_NAME = 'gemini-flash-latest'
 
 # Business Rules
 DAILY_LIMIT = 50
